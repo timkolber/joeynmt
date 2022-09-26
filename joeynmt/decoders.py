@@ -611,7 +611,7 @@ class TransformerDecoderPhase2(Decoder):
     	        memory=encoder_output,
                 decoder_out=decoder_output,
                 src_mask=src_mask,
-                tgt_mask=trg_mask,
+                trg_mask=trg_mask,
                 return_attention=(return_attention and i == last_layer)
         )
                            
