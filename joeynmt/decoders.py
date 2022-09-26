@@ -507,15 +507,37 @@ class TransformerTwoPhaseDecoder(Decoder):
         self._output_size = vocab_size
         
     def forward(
-        self, prev_output_tokens, encoder_out=None, **unused
+        self,
+        trg_embed: Tensor,
+        encoder_output: Tensor,
+        encoder_hidden: Tensor,
+        src_mask: Tensor,
+        unroll_steps: int,
+        hidden: Tensor,
+        trg_mask: Tensor,
+        **kwargs,
+   
     ):
-        decoder_phase1_output = self.decoder_phase1(
-            prev_output_tokens, encoder_out
+        decoder_phase1_output, decoder_phase1_hidden = self.decoder_phase1(
+            trg_embed=trg_embed,
+            encoder_output=encoder_output,
+            encoder_hidden=encoder_hidden,
+            src_mask=src_mask,
+            unroll_steps=unroll_steps,
+            hidden=hidden,
+            trg_mask=trg_mask,
+            **kwargs,
         )
         decoder_phase2_output = self.decoder_phase2(
-            prev_output_tokens,
-            encoder_out,
-            decoder_phase1_output[0],
+            trg_embed=trg_embed,
+            encoder_output=encoder_output,
+            decoder_output=decoder_phase1_output
+            encoder_hidden=encoder_hidden,
+            src_mask=src_mask,
+            unroll_steps=unroll_steps,
+            hidden=hidden,
+            trg_mask=trg_mask,
+            **kwargs,
         )
         return decoder_phase2_output
         
