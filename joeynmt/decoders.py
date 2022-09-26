@@ -539,7 +539,7 @@ class TransformerTwoPhaseDecoder(Decoder):
             trg_mask=trg_mask,
             **kwargs,
         )
-        return decoder_phase2_output
+        return decoder_phase2_output, _, _, _
         
 class TransformerDecoderPhase2(Decoder):
     def __init__(
