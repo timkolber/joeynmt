@@ -608,10 +608,10 @@ class TransformerDecoderPhase2(Decoder):
         for i, layer in enumerate(self.layers):
             x, attn = layer(
                 x,
-    	        memory=encoder_out,
-                decoder_out=decoder_out,
+    	        memory=encoder_output,
+                decoder_out=decoder_output,
                 src_mask=src_mask,
-                tgt_mask=tgt_mask,
+                tgt_mask=trg_mask,
                 return_attention=(return_attention and i == last_layer)
         )
                            
