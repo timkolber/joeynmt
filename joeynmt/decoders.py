@@ -518,7 +518,7 @@ class TransformerTwoPhaseDecoder(Decoder):
         **kwargs,
    
     ):
-        decoder_phase1_output, _, _, _ = self.decoder_phase1(
+        decoder_phase1_output, decoder_phase2_hidden, _, _ = self.decoder_phase1(
             trg_embed=trg_embed,
             encoder_output=encoder_output,
             encoder_hidden=encoder_hidden,
@@ -531,7 +531,7 @@ class TransformerTwoPhaseDecoder(Decoder):
         decoder_phase2_output, _, _, _ = self.decoder_phase2(
             trg_embed=trg_embed,
             encoder_output=encoder_output,
-            decoder_output=decoder_phase1_output,
+            decoder_output=decoder_phase2_hidden,
             encoder_hidden=encoder_hidden,
             src_mask=src_mask,
             unroll_steps=unroll_steps,
