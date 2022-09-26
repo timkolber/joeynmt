@@ -361,13 +361,23 @@ def build_model(cfg: dict = None,
 
     # tie softmax layer with trg embeddings
     if cfg.get("tied_softmax", False):
-        if trg_embed.lut.weight.shape == model.decoder.output_layer.weight.shape:
-            # (also) share trg embeddings and softmax layer:
-            model.decoder.output_layer.weight = trg_embed.lut.weight
+        if dec_cfg.get("type") != "two-phase-transformer":
+            if trg_embed.lut.weight.shape == model.decoder.output_layer.weight.shape:
+                # (also) share trg embeddings and softmax layer:
+                model.decoder.output_layer.weight = trg_embed.lut.weight
+            else:
+                raise ConfigurationError(
+                    "For tied_softmax, the decoder embedding_dim and decoder hidden_size "
+                    "must be the same. The decoder must be a Transformer.")
         else:
-            raise ConfigurationError(
-                "For tied_softmax, the decoder embedding_dim and decoder hidden_size "
-                "must be the same. The decoder must be a Transformer.")
+            if trg_embed.lut.weight.shape == model.decoder.decoder_phase2.output_layer.weight.shape:
+                # (also) share trg embeddings and softmax layer:
+                model.decoder.decoder_phase1.output_layer.weight = trg_embed.lut.weight
+                model.decoder.decoder_phase2.output_layer.weight = trg_embed.lut.weight
+            else:
+                raise ConfigurationError(
+                    "For tied_softmax, the decoder embedding_dim and decoder hidden_size "
+                    "must be the same. The decoder must be a Transformer.")
 
     # custom initialization of model parameters
     initialize_model(model, cfg, src_pad_index, trg_pad_index)
