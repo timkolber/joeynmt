@@ -10,7 +10,7 @@ from torch import Tensor, nn
 from joeynmt.attention import BahdanauAttention, LuongAttention
 from joeynmt.encoders import Encoder
 from joeynmt.helpers import ConfigurationError, freeze_params, subsequent_mask
-from joeynmt.transformer_layers import PositionalEncoding, TransformerDecoderLayer
+from joeynmt.transformer_layers import PositionalEncoding, TransformerDecoderLayer, TransformerDecoderLayerPhase2
 
 
 class Decoder(nn.Module):
@@ -475,6 +475,131 @@ class RecurrentDecoder(Decoder):
                 f"attention={self.attention})")
 
 
+class TransformerTwoPhaseDecoder(Decoder):
+    def __init__(
+        self,
+        num_layers: int = 4,
+        num_heads: int = 8,
+        hidden_size: int = 512,
+        ff_size: int = 2048,
+        dropout: float = 0.1,
+        emb_dropout: float = 0.1,
+        vocab_size: int = 1,
+        freeze: bool = False,
+        **kwargs,
+    ):
+        super().__init__()
+        self.encoder = kwargs.get("encoder")
+        self.decoder_phase1 = TransformerDecoder(
+            encoder=self.encoder, 
+            vocab_size=vocab_size,
+            emb_size=kwargs.get("emb_size"),
+            emb_dropout=emb_dropout
+        )
+        self.decoder_phase2 = TransformerDecoderPhase2(
+            encoder=self.encoder, 
+            vocab_size=vocab_size,
+            emb_size=kwargs.get("emb_size"),
+            emb_dropout=emb_dropout
+        )
+        
+        self._hidden_size = hidden_size
+        self._output_size = vocab_size
+        
+    def forward(
+        self, prev_output_tokens, encoder_out=None, **unused
+    ):
+        decoder_phase1_output = self.decoder_phase1(
+            prev_output_tokens, encoder_out
+        )
+        decoder_phase2_output = self.decoder_phase2(
+            prev_output_tokens,
+            encoder_out,
+            decoder_phase1_output[0],
+        )
+        return decoder_phase2_output
+        
+class TransformerDecoderPhase2(Decoder):
+    def __init__(
+        self,
+        num_layers: int = 4,
+        num_heads: int = 8,
+        hidden_size: int = 512,
+        ff_size: int = 2048,
+        dropout: float = 0.1,
+        emb_dropout: float = 0.1,
+        vocab_size: int = 1,
+        freeze: bool = False,
+        **kwargs,
+    ):
+        super().__init__()
+
+        self._hidden_size = hidden_size
+        self._output_size = vocab_size
+        self.dropout=dropout
+
+        # create num_layers decoder layers and put them in a list
+        self.layers = nn.ModuleList([
+            TransformerDecoderLayerPhase2(
+                size=hidden_size,
+                ff_size=ff_size,
+                num_heads=num_heads,
+                dropout=dropout,
+                alpha=kwargs.get("alpha", 1.0),
+                layer_norm=kwargs.get("layer_norm", "post"),
+            ) for _ in range(num_layers)
+        ])
+
+        self.pe = PositionalEncoding(hidden_size)
+        self.layer_norm = (nn.LayerNorm(hidden_size, eps=1e-6) if kwargs.get(
+            "layer_norm", "post") == "pre" else None)
+
+        self.emb_dropout = nn.Dropout(p=emb_dropout)
+        self.output_layer = nn.Linear(hidden_size, vocab_size, bias=False)
+
+        if freeze:
+            freeze_params(self)
+            
+            
+    def forward(
+        self,
+        trg_embed: Tensor,
+        encoder_out: Tensor,
+        decoder_out: Tensor,
+        src_mask: Tensor,
+        unroll_steps: int,
+        hidden: Tensor,
+        tgt_mask: Tensor,
+        **kwargs,
+    ):
+        """
+        """
+        assert trg_mask is not None, "trg_mask required for Transformer"
+
+        x = self.pe(trg_embed)  # add position encoding to word embedding
+        x = self.emb_dropout(x)
+
+        trg_mask = trg_mask & subsequent_mask(trg_embed.size(1)).type_as(trg_mask)
+
+        last_layer = len(self.layers) - 1
+        return_attention = kwargs.get("return_attention", False)
+        for i, layer in enumerate(self.layers):
+            x, attn = layer(
+                x,
+    	        memory=encoder_out,
+                decoder_out=decoder_out,
+                src_mask=src_mask,
+                tgt_mask=tgt_mask,
+                return_attention=(return_attention and i == last_layer)
+        )
+                           
+        if self.layer_norm is not None:
+            x = self.layer_norm(x)
+
+        out = self.output_layer(x)
+        return out, x, attn, None
+      
+
 class TransformerDecoder(Decoder):
     """
     A transformer decoder with N masked layers.
@@ -533,7 +658,7 @@ class TransformerDecoder(Decoder):
 
         if freeze:
             freeze_params(self)
-
+            
     def forward(
         self,
         trg_embed: Tensor,
@@ -590,3 +715,4 @@ class TransformerDecoder(Decoder):
                 f"num_heads={self.layers[0].trg_trg_att.num_heads}, "
                 f"alpha={self.layers[0].alpha}, "
                 f'layer_norm="{self.layers[0]._layer_norm_position}")')
+

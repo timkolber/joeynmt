@@ -182,7 +182,7 @@ class PositionalEncoding(nn.Module):
             (torch.arange(0, size, 2, dtype=torch.float) * -(math.log(10000.0) / size)))
         pe[:, 0::2] = torch.sin(position.float() * div_term)
         pe[:, 1::2] = torch.cos(position.float() * div_term)
-        pe = pe.unsqueeze(0)  # shape: (1, max_len, size)
+        pe = pe.unsqueeze(0)  # shape: (1, size, max_len)
         super().__init__()
         self.register_buffer("pe", pe)
         self.dim = size
@@ -385,3 +385,116 @@ class TransformerDecoderLayer(nn.Module):
         if return_attention:
             return out, att
         return out, None
+    
+class TransformerDecoderLayerPhase2(nn.Module):
+    """Second phase of decoder layer block
+    This layer will take the input from the encoder and first pass decoder.
+    papers.nips.cc/paper/6775-deliberation-networks-sequence-generation-beyond-one-pass-decoding.pdf
+    """
+
+    def __init__(
+        self,
+        size: int = 0,
+        ff_size: int = 0,
+        num_heads: int = 0,
+        dropout: float = 0.1,
+        alpha: float = 1.0,
+        layer_norm: str = "post",
+    ) -> None:
+        super().__init__()
+        self.size = size
+        
+        self.self_attn = MultiHeadedAttention(
+            num_heads, size, dropout=dropout
+        )
+  
+        self.encoder_attn = MultiHeadedAttention(
+            num_heads, size, dropout=dropout
+        )
+        self.decoder_attn = MultiHeadedAttention(
+            num_heads, size, dropout=dropout
+        )
+        
+        self.feed_forward = PositionwiseFeedForward(
+            size,
+            ff_size=ff_size,
+            dropout=dropout,
+            alpha=alpha,
+            layer_norm=layer_norm,
+        )
+        
+        self.self_layer_norm = nn.LayerNorm(size, eps=1e-6)
+        self.enc_layer_norm = nn.LayerNorm(size, eps=1e-6)
+        self.dec_layer_norm = nn.LayerNorm(size, eps=1e-6)
+        
+        self.dropout = nn.Dropout(dropout)
+        self.alpha = alpha
+        
+        self._layer_norm_position = layer_norm
+        assert self._layer_norm_position in {"pre", "post"}
+        
+
+    def forward(
+        self,
+        x: Tensor,
+        memory: Tensor,
+        decoder_out: Tensor,
+        src_mask: Tensor,
+        trg_mask: Tensor,
+        return_attention: bool = False
+    ) -> Tensor:
+        """
+        Args:
+            x (Tensor): input to the layer of shape `(seq_len, batch, embed_dim)`
+            encoder_padding_mask (ByteTensor): binary ByteTensor of shape
+                `(batch, src_len)` where padding elements are indicated by ``1``.
+        Returns:
+            encoded output of shape `(batch, src_len, embed_dim)`
+        """
+        # 1. target-target self-attention
+        residual = x
+        if self._layer_norm_position == "pre":
+            x = self.self_layer_norm(x)
+
+        h1, attn = self.self_attn(x, x, x, mask=trg_mask)
+        h1 = self.dropout(h1) + self.alpha * residual
+        
+        if self._layer_norm_position == "post":
+            h1 = self.self_layer_norm(h1)
+            
+        # 2. source-target cross-attention
+        h1_residual = h1
+        if self._layer_norm_position == "pre":
+            h1 = self.enc_layer_norm(h1)
+
+        h2, att = self.encoder_attn(memory,
+                                   memory,
+                                   h1,
+                                   mask=src_mask,
+                                   return_weights=return_attention)
+        h2 = self.dropout(h2) + self.alpha * h1_residual
+
+        if self._layer_norm_position == "post":
+            h2 = self.enc_layer_norm(h2)
+            
+        # 3. target1-target2 self-attention
+        h2_residual = h2
+        if self._layer_norm_position == "pre":
+            h2 = self.dec_layer_norm(h2)
+
+        h3, att = self.encoder_attn(decoder_out,
+                                   decoder_out,
+                                   h2,
+                                   return_weights=return_attention)
+        h3 = self.dropout(h3) + self.alpha * h2_residual
+
+        if self._layer_norm_position == "post":
+            h3 = self.dec_layer_norm(h3)
+
+        # 3. final position-wise feed-forward layer
+        out = self.feed_forward(h3)
+
+        if return_attention:
+            return out, att
+        return out, None
+

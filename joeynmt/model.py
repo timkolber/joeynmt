@@ -11,7 +11,7 @@ import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
 
-from joeynmt.decoders import Decoder, RecurrentDecoder, TransformerDecoder
+from joeynmt.decoders import Decoder, RecurrentDecoder, TransformerDecoder, TransformerTwoPhaseDecoder
 from joeynmt.embeddings import Embeddings
 from joeynmt.encoders import Encoder, RecurrentEncoder, TransformerEncoder
 from joeynmt.helpers import ConfigurationError
@@ -93,7 +93,7 @@ class Model(nn.Module):
             assert self.loss_function is not None
             assert "trg" in kwargs and "trg_mask" in kwargs  # need trg to compute loss
 
-            out, _, att_probs, _ = self._encode_decode(**kwargs)
+            out, _, _, _ = self._encode_decode(**kwargs)
 
             # compute log probs
             log_probs = F.log_softmax(out, dim=-1)
@@ -111,7 +111,7 @@ class Model(nn.Module):
 
             # return batch loss
             #     = sum over all elements in batch that are not pad
-            return_tuple = (batch_loss, log_probs, att_probs, n_correct)
+            return_tuple = (batch_loss, log_probs, None, n_correct)
 
         elif return_type == "encode":
             kwargs["pad"] = True  # TODO: only if multi-gpu
@@ -178,7 +178,8 @@ class Model(nn.Module):
             - hidden_concat
             - src_mask
         """
-        return self.encoder(self.src_embed(src), src_length, src_mask, **_kwargs)
+        src_input = src if self.src_embed is None else self.src_embed(src)
+        return self.encoder(src_input, src_length, src_mask, **_kwargs)
 
     def _decode(
         self,
@@ -255,6 +256,12 @@ class _DataParallel(nn.DataParallel):
         except AttributeError:
             return getattr(self.module, name)
 
+class TransformerTwoPhaseModel(Model):
+    """
+    Deliberation network model
+    """
+    def __init__(self, encoder, decoder, src_embed, trg_embed, src_vocab, trg_vocab):
+        super().__init__(encoder, decoder, src_embed, trg_embed, src_vocab, trg_vocab)
 
 def build_model(cfg: dict = None,
                 src_vocab: Vocabulary = None,
@@ -326,6 +333,13 @@ def build_model(cfg: dict = None,
             emb_size=trg_embed.embedding_dim,
             emb_dropout=dec_emb_dropout,
         )
+    elif dec_cfg.get("type") == "two-phase-transformer":
+        decoder = TransformerTwoPhaseDecoder(
+            encoder=encoder,
+            vocab_size=len(trg_vocab),
+            emb_size=trg_embed.embedding_dim,
+            emb_dropout=dec_emb_dropout,
+        )
     else:
         decoder = RecurrentDecoder(
             **dec_cfg,
@@ -334,6 +348,7 @@ def build_model(cfg: dict = None,
             emb_size=trg_embed.embedding_dim,
             emb_dropout=dec_emb_dropout,
         )
+
 
     model = Model(
         encoder=encoder,
@@ -360,10 +375,11 @@ def build_model(cfg: dict = None,
     # initialize embeddings from file
     enc_embed_path = enc_cfg["embeddings"].get("load_pretrained", None)
     dec_embed_path = dec_cfg["embeddings"].get("load_pretrained", None)
-    if enc_embed_path:
+    if enc_embed_path and src_vocab is not None:
         logger.info("Loading pretrained src embeddings...")
         model.src_embed.load_from_file(Path(enc_embed_path), src_vocab)
-    if dec_embed_path and not cfg.get("tied_embeddings", False):
+    if (dec_embed_path and src_vocab is not None
+            and not cfg.get("tied_embeddings", False)):
         logger.info("Loading pretrained trg embeddings...")
         model.trg_embed.load_from_file(Path(dec_embed_path), trg_vocab)
 
