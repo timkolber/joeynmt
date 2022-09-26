@@ -586,12 +586,12 @@ class TransformerDecoderPhase2(Decoder):
     def forward(
         self,
         trg_embed: Tensor,
-        encoder_out: Tensor,
-        decoder_out: Tensor,
+        encoder_output: Tensor,
+        decoder_output: Tensor,
         src_mask: Tensor,
         unroll_steps: int,
         hidden: Tensor,
-        tgt_mask: Tensor,
+        trg_mask: Tensor,
         **kwargs,
     ):
         """
