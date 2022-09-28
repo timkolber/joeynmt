@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+from torch.distributions import Categorical
 
 from joeynmt.decoders import Decoder, RecurrentDecoder, TransformerDecoder, TransformerTwoPhaseDecoder
 from joeynmt.embeddings import Embeddings
@@ -18,6 +19,7 @@ from joeynmt.helpers import ConfigurationError
 from joeynmt.initialization import initialize_model
 from joeynmt.loss import XentLoss
 from joeynmt.vocabulary import Vocabulary
+from joeynmt.helpers import log_peakiness, join_strings
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +75,79 @@ class Model(nn.Module):
         self._loss_function = XentLoss(pad_index=self.pad_index,
                                        smoothing=label_smoothing)
 
+    def reinforce(self, max_output_length, src: Tensor, trg: Tensor, src_mask: Tensor,
+            src_length: Tensor, temperature: float, topk: int, log_probabilities: False, pickle_logs:False):
+
+        """ Computes forward pass for Policy Gradient aka REINFORCE
+        
+        Encodes source, then step by step decodes and samples token from output distribution.
+        Calls the loss function to compute the BLEU and loss
+        :param max_output_length: max output length
+        :param src: source input
+        :param trg: target input
+        :param src_mask: source mask
+        :param src_length: length of source inputs
+        :param temperature: softmax temperature
+        :param topk: consider top-k parameters for logging
+        :param log_probabilities: log probabilities
+        :return: loss, logs
+        """
+
+        encoder_output, encoder_hidden = self._encode(src, src_length,
+            src_mask)
+        # if maximum output length is not globally specified, adapt to src len
+        if max_output_length is None:
+            max_output_length = int(max(src_length.cpu().numpy()) * 1.5)
+        batch_size = src_mask.size(0)
+        ys = encoder_output.new_full([batch_size, 1], self.bos_index, dtype=torch.long)
+        trg_mask = src_mask.new_ones([1, 1, 1])
+        distributions = []
+        log_probs = 0
+        # init hidden state in case of using rnn decoder  
+        hidden = self.decoder._init_hidden(encoder_hidden) \
+            if hasattr(self.decoder,'_init_hidden') else 0
+        attention_vectors = None
+        finished = src_mask.new_zeros((batch_size)).byte()
+        # decode tokens
+        for _ in range(max_output_length):
+            previous_words = ys[:, -1].view(-1, 1) if hasattr(self.decoder,'_init_hidden') else ys
+            logits, hidden, _, attention_vectors = self.decoder(
+                trg_embed=self.trg_embed(previous_words),
+                encoder_output=encoder_output,
+                encoder_hidden=encoder_hidden,
+                src_mask=src_mask,
+                unroll_steps=1,
+                hidden=hidden,
+                prev_att_vector=attention_vectors,
+                trg_mask=trg_mask
+            )
+            logits = logits[:, -1]/temperature
+            distrib = Categorical(logits=logits)
+            distributions.append(distrib)
+            next_word = distrib.sample()
+            log_probs += distrib.log_prob(next_word)
+            ys = torch.cat([ys, next_word.unsqueeze(-1)], dim=1)
+            # prevent early stopping in decoding when logging gold token
+            if not pickle_logs:
+                # check if previous symbol was <eos>
+                is_eos = torch.eq(next_word, self.eos_index)
+                finished += is_eos
+                # stop predicting if <eos> reached for all elements in batch
+                if (finished >= 1).sum() == batch_size:
+                    break
+        ys = ys[:, 1:]
+        predicted_output = self.trg_vocab.arrays_to_sentences(arrays=ys,
+                                                        cut_at_eos=True)
+        gold_output = self.trg_vocab.arrays_to_sentences(arrays=trg,
+                                                    cut_at_eos=True)
+        predicted_strings = [join_strings(wordlist) for wordlist in predicted_output]
+        gold_strings = [join_strings(wordlist) for wordlist in gold_output]
+        # get reinforce loss
+        batch_loss, rewards, old_bleus = self.loss_function(predicted_strings, gold_strings,  log_probs)
+        return (batch_loss, log_peakiness(self.pad_index, self.trg_vocab, topk, distributions,
+        trg, batch_size, max_output_length, gold_strings, predicted_strings, rewards, old_bleus)) \
+        if log_probabilities else (batch_loss, [])
+        
     def forward(self,
                 return_type: str = None,
                 **kwargs) -> Tuple[Tensor, Tensor, Tensor, Tensor]:
@@ -113,6 +188,20 @@ class Model(nn.Module):
             #     = sum over all elements in batch that are not pad
             return_tuple = (batch_loss, log_probs, None, n_correct)
 
+        elif return_type == "reinforce":
+            loss, logging = self.reinforce(
+            src=kwargs["src"],
+            trg=kwargs["trg"],
+            src_mask=kwargs["src_mask"],
+            src_length=kwargs["src_length"],
+            max_output_length=kwargs["max_output_length"],
+            temperature=kwargs["temperature"],
+            topk=kwargs['topk'],
+            log_probabilities=kwargs["log_probabilities"],
+            pickle_logs=kwargs["pickle_logs"]
+            )
+            return_tuple = (loss, logging, None, None)
+            
         elif return_type == "encode":
             kwargs["pad"] = True  # TODO: only if multi-gpu
             encoder_output, encoder_hidden = self._encode(**kwargs)
