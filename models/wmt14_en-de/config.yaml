@@ -1,0 +1,123 @@
+name: "wmt14_ende"
+joeynmt_version: "2.1.0"
+
+data:
+    train: "wmt14"
+    dev: "wmt14"
+    test: "wmt14"
+    dataset_type: "huggingface"
+    dataset_cfg:
+        name: "de-en"
+    sample_train_subset: -1
+    sample_dev_subset: 500
+    src:
+        lang: "en"
+        max_length: 512
+        lowercase: False
+        normalize: True
+        level: "bpe"
+        voc_min_freq: 1
+        voc_limit: 32000
+        voc_file: "models/wmt14_en-de/wmt14_sp.vocab"
+        tokenizer_type: "sentencepiece"
+        tokenizer_cfg:
+            model_file: "models/wmt14_en-de/wmt14_sp.model"
+            pretokenizer: "moses"
+    trg:
+        lang: "de"
+        max_length: 512
+        lowercase: False
+        normalize: True
+        level: "bpe"
+        voc_min_freq: 1
+        voc_limit: 32000
+        voc_file: "models/wmt14_en-de/wmt14_sp.vocab"
+        tokenizer_type: "sentencepiece"
+        tokenizer_cfg:
+            model_file: "models/wmt14_en-de/wmt14_sp.model"
+            pretokenizer: "moses"
+
+testing:
+    n_best: 1
+    beam_size: 4
+    beam_alpha: 0.6
+    batch_size: 1024
+    batch_type: "token"
+    max_output_length: 100
+    min_output_length: 1
+    eval_metrics: ["bleu"]
+    return_prob: "hyp"
+    generate_unk: False
+    repetition_penalty: -1
+    no_repeat_ngram_size: -1
+    sacrebleu_cfg:
+        tokenize: "13a"
+
+training:
+    load_encoder: "models/wmt14_en-de/avg5.ckpt"
+    load_decoder: "models/wmt14_en-de/avg5.ckpt"
+    #reset_best_ckpt: False
+    #reset_scheduler: False
+    #reset_optimizer: False
+    #reset_iter_state: False
+    random_seed: 42
+    optimizer: "adam"
+    normalization: "tokens"
+    adam_betas: [0.9, 0.98]
+    loss: "crossentropy"
+    learning_rate: 0.0007
+    learning_rate_min: 0.00000001
+    learning_rate_warmup: 4000
+    scheduling: "warmupinversesquareroot"
+    weight_decay: 0.0
+    label_smoothing: 0.1
+    batch_size: 4096
+    batch_type: "token"
+    batch_multiplier: 8
+    early_stopping_metric: "ppl"
+    updates: 100000
+    epochs: 100
+    validation_freq: 1000
+    logging_freq: 100
+    model_dir: "models/wmt14_en-de"
+    overwrite: False
+    shuffle: True
+    use_cuda: True
+    fp16: True
+    print_valid_sents: [0, 1, 2, 3]
+    keep_best_ckpts: 5
+
+model:
+    initializer: "xavier_uniform"
+    bias_initializer: "zeros"
+    init_gain: 1.0
+    embed_initializer: "xavier_uniform"
+    embed_init_gain: 1.0
+    tied_embeddings: True
+    tied_softmax: True
+    encoder:
+        type: "transformer"
+        num_layers: 6
+        num_heads: 8
+        embeddings:
+            embedding_dim: 512
+            scale: True
+            dropout: 0.
+        # typically ff_size = 4 x hidden_size
+        hidden_size: 512
+        ff_size: 2048
+        dropout: 0.1
+        layer_norm: "pre"
+    decoder:
+        type: "transformer"
+        num_layers: 6
+        num_heads: 8
+        embeddings:
+            embedding_dim: 512
+            scale: True
+            dropout: 0.
+        # typically ff_size = 4 x hidden_size
+        hidden_size: 512
+        ff_size: 2048
+        dropout: 0.1
+        layer_norm: "pre"

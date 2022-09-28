@@ -489,15 +489,14 @@ class TransformerTwoPhaseDecoder(Decoder):
         **kwargs,
     ):
         super().__init__()
-        self.encoder = kwargs.get("encoder")
         self.decoder_phase1 = TransformerDecoder(
-            encoder=self.encoder, 
+            encoder=kwargs.get("encoder"),
             vocab_size=vocab_size,
             emb_size=kwargs.get("emb_size"),
             emb_dropout=emb_dropout
         )
         self.decoder_phase2 = TransformerDecoderPhase2(
-            encoder=self.encoder, 
+            encoder=kwargs.get("encoder"), 
             vocab_size=vocab_size,
             emb_size=kwargs.get("emb_size"),
             emb_dropout=emb_dropout

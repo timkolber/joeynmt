@@ -21,6 +21,7 @@ from torch.utils.tensorboard import SummaryWriter
 from joeynmt.batch import Batch
 from joeynmt.builders import build_gradient_clipper, build_optimizer, build_scheduler
 from joeynmt.data import load_data
+from joeynmt.decoders import TransformerTwoPhaseDecoder
 from joeynmt.helpers import (
     delete_ckpt,
     load_checkpoint,
@@ -303,10 +304,22 @@ class TrainManager:
         """
         logger.info("Loading model from %s", path)
         model_checkpoint = load_checkpoint(path=path, device=self.device)
-
-        # restore model and optimizer parameters
-        self.model.load_state_dict(model_checkpoint["model_state"])
-
+        if isinstance(self.model.decoder, TransformerTwoPhaseDecoder):
+            layer_state_dict = OrderedDict()
+            ckpt = load_checkpoint(path=path, device=self.device)
+            for k, v in ckpt["model_state"].items():
+                if k.startswith("decoder."):
+                    decoder1 = k.replace("decoder.", "decoder.decoder_phase1.")
+                    layer_state_dict[decoder1] = v
+                    decoder2 = k.replace("decoder.", "decoder.decoder_phase2.")
+                    layer_state_dict[decoder2] = v
+            self.model.load_state_dict(layer_state_dict, strict=False)
+            # restore model and optimizer parameters
+            self.model.load_state_dict(model_checkpoint["model_state"], strict=False)
+        else:
+            # restore model and optimizer parameters
+            self.model.load_state_dict(model_checkpoint["model_state"], strict=True)
+        
         if not reset_optimizer:
             self.optimizer.load_state_dict(model_checkpoint["optimizer_state"])
             if "scaler_state" in model_checkpoint:

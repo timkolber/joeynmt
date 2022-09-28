@@ -205,7 +205,7 @@ class SentencePieceTokenizer(BasicTokenizer):
             sequence = remove_extra_spaces(sequence)
 
         # ensure the string is not empty.
-        assert sequence is not None and len(sequence) > 0, sequence
+        # assert sequence is not None and len(sequence) > 0, sequence
         return sequence
 
     def set_vocab(self, itos: List[str]) -> None:

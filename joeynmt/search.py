@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from torch import Tensor
 
 from joeynmt.batch import Batch
-from joeynmt.decoders import RecurrentDecoder, TransformerDecoder
+from joeynmt.decoders import RecurrentDecoder, TransformerDecoder, TransformerTwoPhaseDecoder
 from joeynmt.helpers import tile
 from joeynmt.model import Model
 
@@ -41,7 +41,7 @@ def greedy(
         - stacked_attention_scores: attention scores (3d array)
     """
     # pylint: disable=no-else-return
-    if isinstance(model.decoder, TransformerDecoder):
+    if isinstance(model.decoder, TransformerDecoder) or isinstance(model.decoder, TransformerTwoPhaseDecoder):
         return transformer_greedy(
             src_mask,
             max_output_length,
