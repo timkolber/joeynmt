@@ -1,4 +1,4 @@
-# &nbsp; ![Joey-NMT with Deliberation networks](joey2-small.png) Joey NMT
+# &nbsp; ![Joey-NMT](joey2-small.png) Joey NMT with Deliberation networks!
 [![build](https://github.com/joeynmt/joeynmt/actions/workflows/main.yml/badge.svg)](https://github.com/joeynmt/joeynmt/actions/workflows/main.yml)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
